@@ -7,20 +7,71 @@ A starter that extends the Foundations chat with retrieval-augmented generation.
 ```
 rag-starter/
 ├── documents/                  20 real Wikipedia articles (Apollo missions)
-├── indexer.py                  walk docs → chunk → embed → store
+├── indexer.py                  walk docs → chunk → embed → store (title metadata)
+├── config.py                   feature toggles (env-driven) — see below
 ├── backend/
-│   ├── app.py                  extended chat with RAG stubs
+│   ├── app.py                  RAG chat: rewrite → search → threshold → rerank → group
 │   └── requirements.txt
-├── frontend/                   React UI (Foundations chat + Sources display)
+├── frontend/                   React UI (Markdown rendering + token display)
+├── eval_questions.py           fixed test question set
+├── eval.py                     run the set against the backend, print a report
 └── .env.example
 ```
 
-**The corpus** is 20 Wikipedia articles (plain-text extracts):
+## Feature toggles & measurement
 
-- 15 Apollo missions: 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17
-- 5 related: Apollo program (overview), Saturn V, Lunar Module, Command/Service Module, Mission Control Center
+Every improvement is gated behind an env toggle in [config.py](config.py) so you can
+measure each one independently. Defaults are in `.env.example`. To A/B a feature:
+flip its toggle in `.env`, restart `backend/app.py`, and re-run `python eval.py`,
+then diff the answer quality, cited sources, and input/output token counts.
 
-Total ~850 KB of text across the 20 files. After chunking (~1000 chars each) you'll have several hundred chunks. Real enough that some questions answer crisply and others surface the seams.
+| Phase | Feature | Env toggle | Default |
+| ----- | ------- | ---------- | ------- |
+| 0-1 | Token usage tracking (log + UI) | `TRACK_TOKENS` | on |
+| 0-2 | Retrieval debug logs | `DEBUG_SEARCH` | on |
+| 1-1 | Markdown rendering (frontend) | — (always on) | on |
+| 1-2 | Token display in UI | `TRACK_TOKENS` | on |
+| 2-1 | Similarity threshold filter + no-info path | `ENABLE_THRESHOLD` / `SIMILARITY_THRESHOLD` | on / 0.35 |
+| 2-2 | Query rewrite (extra LLM call) | `ENABLE_QUERY_REWRITE` | off |
+| 2-3 | Title/source metadata on chunks | — (stored at index time) | on |
+| 3-1 | Group/sort chunks by document | `ENABLE_CHUNK_GROUPING` | on |
+| 3-2 | Inject source into context | `ENABLE_SOURCE_IN_CONTEXT` | on |
+| 4-1 | LLM re-ranking | `ENABLE_RERANK` / `RERANK_FETCH_K` / `RERANK_TOP_N` | off |
+| 4-2 | Agentic iterative search (tool loop) | `ENABLE_AGENTIC_SEARCH` / `MAX_SEARCH_ITERS` | off |
+
+> The threshold is cosine **similarity** (higher = closer). With this multilingual
+> model, in-corpus questions score ~0.6–0.76 and clearly-unrelated ones ~0.13–0.22,
+> so 0.35 filters junk (→ "관련 정보를 찾지 못했습니다", no LLM call) without dropping real hits.
+> Watch the `[search]` score logs to tune it.
+
+## Evaluating
+
+```bash
+python backend/app.py     # terminal 1
+python eval.py            # terminal 2 — runs the fixed question set
+```
+
+`eval.py` prints each question, the answer, cited sources vs. expected, and per-question
++ total token counts. Run it with a feature off, then on, and compare.
+
+**The corpus** is the U.S. Federal Aviation Regulations (Title 14 CFR, 2025) as PDFs:
+
+- Part 61 (pilot certification), Part 67 (medical), Part 71 (airspace designation),
+  Part 73 (special-use airspace), Part 91 (general operating rules)
+- Title 14 Vol 1 (Parts 1–59, ~970 pages) — included as realistic noise
+
+PDFs are extracted with `pypdf` and chunked **by CFR section** (split on `§ N.NN`
+boundaries), not by page. Each chunk is cleaned of PDF artifacts (line-break
+hyphenation, running headers, docket citations) and prepended with its section
+heading, so every chunk carries an anchor like `§ 61.109 Aeronautical experience`
+plus a page number. Citations point to `Part N, § X.YY, p.Z`.
+
+> **Why section-aware chunking matters here:** with naive page-by-page chunks, the
+> §61.109 passage that literally answers "what flight hours are required?" embedded
+> to only 0.39 similarity (rank ~2600) because each chunk blended the tail of one
+> section with the head of the next, plus header/docket noise. Splitting on section
+> boundaries and stripping boilerplate lifts that same passage to 0.80 (rank #1).
+> Similarity ≠ relevance, and chunk hygiene dominated retrieval quality on this corpus.
 
 ## Setup
 
@@ -65,9 +116,8 @@ The citation parser is already wired — it returns the source filenames the mod
 ### 3. Run it
 
 ```bash
-# Terminal 1 — backend
-cd backend
-python app.py
+# Terminal 1 — backend (serves on http://127.0.0.1:5001)
+python backend/app.py
 
 # Terminal 2 — frontend
 cd frontend
@@ -75,17 +125,20 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173>. Ask questions about the Apollo program. You should see:
-- An answer that draws on the indexed docs
-- A `Sources:` line citing which files were used
+Open <http://localhost:5173>. Ask questions about the regulations. You should see:
+- A Markdown-rendered answer that draws on the indexed PDFs
+- A `Sources:` line citing `Part N, p.X`
+- Per-answer **token usage** and a **🔍 검색 모니터링** panel showing the retrieved
+  chunks, their similarity scores, and which ones the threshold dropped
+- A running **session token total** in the top bar
 
-**Try these (graded easy → hard):**
+**The 5 practice questions** (in [eval_questions.py](eval_questions.py)):
 
-- *"What was the cause of the Apollo 1 fire?"* — single-doc, factual.
-- *"Which Apollo missions landed on the Moon?"* — cross-cutting, enumeration.
-- *"Compare the moonwalk durations of Apollo 11 and Apollo 17."* — cross-doc, comparison.
-- *"List Apollo missions that used the Saturn V rocket."* — cross-doc, requires reasoning over the corpus.
-- *"What is the Artemis program?"* — **out-of-corpus**; the system should say it doesn't know rather than hallucinate.
+- Private-pilot aeronautical experience (single-engine) — Part 61
+- First-class medical disqualifying conditions — Part 67
+- VFR fuel reserves, day vs. night — Part 91
+- Class B vs. Class C operating requirements — Parts 71 + 91
+- What to do before operating in an active restricted area — Part 73 (+ §91.133)
 
 ### 4. Report
 
