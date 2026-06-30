@@ -20,6 +20,7 @@ Set ENABLE_AGENTIC_SEARCH=1 to instead let Claude drive search as a tool loop
 """
 import re
 import sys
+import time
 from pathlib import Path
 
 # Make the parent directory importable so we can use indexer.py and config.py
@@ -31,7 +32,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 from config import CONFIG
-from indexer import load_index, search
+from indexer import embed, load_index, search
 
 load_dotenv()  # ANTHROPIC_API_KEY from .env
 
@@ -42,26 +43,22 @@ client = Anthropic()
 # Load the index once at startup. Fails fast if no index — run `python indexer.py` first.
 INDEX = load_index()
 print(f"Loaded {len(INDEX)} chunks from disk")
+# Warm up the embedding model so the FIRST query's [timing] reflects steady-state
+# retrieval, not the one-time model graph warm-up (~4s otherwise).
+embed(["warmup"])
 print(CONFIG.summary())
 
 NO_INFO_MESSAGE = "관련 정보를 찾지 못했습니다."
 
 
-SYSTEM_PROMPT = """You are a helpful assistant that answers questions using ONLY the \
-sources provided in the CONTEXT block of each message.
+SYSTEM_PROMPT = """Answer the question using ONLY the numbered CONTEXT sources.
 
-Rules:
-- Base every statement strictly on the provided context. Do not use outside knowledge, \
-and do not guess or infer beyond what the sources state.
-- Cite each factual claim with a bracketed source number, e.g. [1] or [2][3], using the \
-numbers shown in the context. Place the citation immediately after the claim it supports.
-- Only use citation numbers that appear in the context. Never invent a number.
-- If the context does not contain enough information to answer, say so explicitly \
-(e.g. "The provided sources don't contain an answer to that.") and do not fabricate one.
-- If only part of the question is supported, answer that part and clearly state what the \
-sources do not cover.
-- You may answer in the language of the question. Format answers in Markdown \
-(use tables, lists, headings, and code blocks where helpful)."""
+- Use only facts stated in the context; no outside knowledge, no guessing.
+- Cite each claim with [n] using the context numbers; never invent a number.
+- If the context lacks the answer, say so in one sentence; don't fabricate. If only \
+part is supported, answer that part and note what's missing.
+- Be concise: answer directly, no preamble, no restating the question, no closing \
+disclaimers. Prefer compact tables/lists. Answer in the question's language, in Markdown."""
 
 
 # ════════════════════════════════════════════════════════════════
@@ -409,18 +406,26 @@ def agentic_chat(question: str) -> tuple[str, list[dict], dict]:
 # Route
 # ════════════════════════════════════════════════════════════════
 
+def _ms(seconds: float) -> int:
+    return round(seconds * 1000)
+
+
 @app.route("/api/chat", methods=["POST"])
 def chat():
     user_message = request.json["message"]
+    t_start = time.perf_counter()
 
     if CONFIG.enable_agentic_search:
         answer, hits, usage = agentic_chat(user_message)
         citations = _build_citations(answer, hits)
+        timing = {"total_ms": _ms(time.perf_counter() - t_start)}
+        print(f"[timing] agentic total={timing['total_ms']}ms")
         return jsonify({
             "reply": answer,
             "citations": citations,
             "usage": usage,
             "retrieval": _build_retrieval(hits, hits),
+            "timing": timing,
         })
 
     # Phase 2-2: optionally rewrite the question into a better search query.
@@ -430,31 +435,44 @@ def chat():
     else:
         search_query = user_message
 
+    t_retrieval = time.perf_counter()
     hits, raw_hits = retrieve(user_message, search_query)
+    retrieval_ms = _ms(time.perf_counter() - t_retrieval)
     retrieval = _build_retrieval(hits, raw_hits)
     retrieval["search_query"] = search_query
 
     # Phase 2-1: nothing cleared the threshold → don't call the LLM, say so.
     if not hits:
         print("[search] no chunks passed the threshold → returning no-info response")
+        timing = {"retrieval_ms": retrieval_ms, "llm_ms": 0,
+                  "total_ms": _ms(time.perf_counter() - t_start)}
+        print(f"[timing] retrieval={timing['retrieval_ms']}ms llm=0ms "
+              f"total={timing['total_ms']}ms (no-info)")
         return jsonify({
             "reply": NO_INFO_MESSAGE,
             "citations": [],
             "usage": {"input_tokens": 0, "output_tokens": 0},
             "retrieval": retrieval,
+            "timing": timing,
         })
 
     context = build_context(hits)
     user_content = f"CONTEXT:\n{context}\n\nQUESTION:\n{user_message}"
 
+    t_llm = time.perf_counter()
     resp = client.messages.create(
         model=CONFIG.claude_model,
         max_tokens=CONFIG.max_tokens,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
     )
+    llm_ms = _ms(time.perf_counter() - t_llm)
     answer = resp.content[0].text
     usage = TOKENS.record(resp.usage, "answer")
+
+    timing = {"retrieval_ms": retrieval_ms, "llm_ms": llm_ms,
+              "total_ms": _ms(time.perf_counter() - t_start)}
+    print(f"[timing] retrieval={retrieval_ms}ms llm={llm_ms}ms total={timing['total_ms']}ms")
 
     citations = _build_citations(answer, hits)
     return jsonify({
@@ -462,6 +480,7 @@ def chat():
         "citations": citations,
         "usage": usage,
         "retrieval": retrieval,
+        "timing": timing,
     })
 
 

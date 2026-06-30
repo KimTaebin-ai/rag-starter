@@ -88,6 +88,14 @@ h1 {
   color: #999;
 }
 
+.latency {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: #999;
+  font-variant-numeric: tabular-nums;
+}
+.latency b { color: #0a7a3b; font-weight: 600; }
+
 .topbar {
   display: flex;
   align-items: baseline;
