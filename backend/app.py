@@ -214,6 +214,15 @@ def retrieve(question: str, search_query: str) -> list[dict]:
     else:
         hits = hits[: CONFIG.top_k]
 
+    if CONFIG.enable_dedupe and hits:
+        # Idea ②: drop chunks whose text is ~80%+ contained in a higher-ranked
+        # chunk (near-duplicates / heavy overlap). Pure token waste removal —
+        # the dropped chunk adds no new information.
+        before = len(hits)
+        hits = _dedupe_hits(hits)
+        if len(hits) != before:
+            log_search(f"after dedupe ({before}->{len(hits)})", search_query, hits)
+
     if CONFIG.enable_chunk_grouping and hits:
         # Phase 3-1: cluster chunks from the same document and order them by
         # chunk_index, while keeping documents in order of their best hit.
@@ -226,8 +235,29 @@ def retrieve(question: str, search_query: str) -> list[dict]:
     return hits, raw_hits
 
 
+def _dedupe_hits(hits: list[dict], thresh: float = 0.8) -> list[dict]:
+    """Drop near-duplicate chunks (idea ②).
+
+    A chunk is a duplicate if its word set is >= `thresh` contained in an
+    already-kept chunk (containment = |A∩B| / |smaller|). Keeps the first
+    (higher-ranked) occurrence. Removes redundant/overlapping chunks so the
+    context carries no repeated text.
+    """
+    kept: list[dict] = []
+    kept_words: list[set] = []
+    for h in hits:
+        words = set(h["text"].lower().split())
+        if not words:
+            continue
+        if any(len(words & kw) / min(len(words), len(kw)) >= thresh for kw in kept_words):
+            continue
+        kept.append(h)
+        kept_words.append(words)
+    return kept
+
+
 def _source_label(h: dict) -> str:
-    """e.g. '14 CFR Part 61, § 61.109 Aeronautical experience, p.49'."""
+    """Full provenance for the user-facing UI: '14 CFR Part 61, § 61.109 …, p.49'."""
     label = h.get("title", h["source"])
     if h.get("section"):
         label += f", {h['section']}"
@@ -236,11 +266,21 @@ def _source_label(h: dict) -> str:
     return label
 
 
+def _context_label(h: dict) -> str:
+    """Compact in-context provenance for the LLM (idea ①).
+
+    Just the section (e.g. '§ 91.155'), or the title if there's no section.
+    The full title/page still reach the frontend via the citations payload, so
+    there's no point spending ~15 tokens/chunk repeating them to the model.
+    """
+    return h.get("section") or h.get("title") or h["source"]
+
+
 def build_context(hits: list[dict]) -> str:
     """Phase 3-2: numbered context block, each chunk prefixed with its source."""
     blocks = []
     for i, h in enumerate(hits):
-        head = f"[{i + 1}] (출처: {_source_label(h)})" if CONFIG.enable_source_in_context else f"[{i + 1}]"
+        head = f"[{i + 1}] ({_context_label(h)})" if CONFIG.enable_source_in_context else f"[{i + 1}]"
         blocks.append(f"{head}\n{h['text']}")
     return "\n\n".join(blocks)
 

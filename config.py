@@ -61,6 +61,9 @@ class Config:
     # ── Phase 2-2 — query rewrite (extra LLM call) ────────────────
     enable_query_rewrite: bool = _flag("ENABLE_QUERY_REWRITE", False)
 
+    # ── Drop near-duplicate / overlapping chunks (token saver, idea ②) ─
+    enable_dedupe: bool = _flag("ENABLE_DEDUPE", True)
+
     # ── Phase 3-1 — group/sort chunks by document ────────────────
     enable_chunk_grouping: bool = _flag("ENABLE_CHUNK_GROUPING", True)
 
