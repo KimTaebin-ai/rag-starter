@@ -1,8 +1,23 @@
+# ── Python ──────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+.venv/
+
+# ── Node / frontend build ───────────────────────────────
+node_modules/
+dist/
+
+# ── Secrets & environment (.env.example stays tracked) ──
 .env
-.venv
+
+# ── Index backups (index.pkl itself is committed) ───────
+index.pkl
+index.pkl.*
+
+# ── OS / editor / tooling cruft ─────────────────────────
+.DS_Store
+.claude/
+
+# ── Local-only docs (spec & grading rubric) ─────────────
 requirement.md
-.claude
-*/node_modules
-__pycache__
-dist
-.venv/*
+evalset.md

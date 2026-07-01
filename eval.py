@@ -11,8 +11,9 @@ Per question it checks:
 Usage (activate the venv first: `source .venv/bin/activate`):
     python backend/app.py     # one terminal (backend on :5001)
     python eval.py            # the main question set
-    python eval.py --negatives    # only the 20 no-answer (negative) questions
+    python eval.py --negatives    # only the no-answer (negative) questions
     python eval.py --all          # main set + negatives
+    python eval.py --followups    # multi-turn sequences (checks follow-up continuity)
     python eval.py --full         # also print each answer's full text
 
 Env:
@@ -25,17 +26,31 @@ import textwrap
 import urllib.request
 from collections import defaultdict
 
-from eval_questions import NO_ANSWER_QUESTIONS, QUESTIONS
+from eval_questions import FOLLOWUP_SEQUENCES, NO_ANSWER_QUESTIONS, QUESTIONS
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:5001")
-NO_INFO_MARKERS = ("관련 정보를 찾지 못했습니다", "don't contain", "do not contain",
-                   "not covered", "not contain", "no information")
+# Phrases that signal a graceful refusal / "not in the corpus" answer. Broad on
+# purpose: a good refusal of a domain-adjacent question often names the related
+# material it DID find (e.g. "the context covers fractional-ownership rules, not
+# scheduled operations") — that's a correct refusal even though it cites the
+# adjacent chunk, so we detect the disclaimer regardless of citations. A real
+# hallucination asserts the answer instead and hits none of these.
+NO_INFO_MARKERS = (
+    "관련 정보를 찾지 못했습니다",
+    "don't contain", "do not contain", "does not contain", "doesn't contain",
+    "not contain", "not covered", "does not cover", "do not cover", "doesn't cover",
+    "not addressed", "not in the provided", "not in the sources",
+    "not in these sources", "no information",
+)
 
 
-def post_chat(message: str, timeout: int = 180) -> dict:
+def post_chat(message: str, history: list | None = None, timeout: int = 180) -> dict:
+    payload = {"message": message}
+    if history:
+        payload["history"] = history
     req = urllib.request.Request(
         f"{BACKEND_URL}/api/chat",
-        data=json.dumps({"message": message}).encode(),
+        data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
@@ -43,12 +58,39 @@ def post_chat(message: str, timeout: int = 180) -> dict:
         return json.loads(resp.read().decode())
 
 
+def run_followups() -> None:
+    """Send each multi-turn sequence, carrying history, so you can eyeball
+    whether a follow-up ("How about for Class B?") stays on topic."""
+    for i, turns in enumerate(FOLLOWUP_SEQUENCES, 1):
+        print("=" * 80)
+        print(f"Follow-up sequence {i}")
+        history: list = []
+        for t, q in enumerate(turns, 1):
+            print(f"\n  Turn {t} — Q: {q}")
+            try:
+                data = post_chat(q, history)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  ! request failed: {exc}")
+                break
+            reply = data.get("reply", "")
+            cited = sorted({c["source"].split("-")[-1].replace(".pdf", "")
+                            for c in data.get("citations", [])})
+            print(textwrap.indent(textwrap.fill(reply, 90), "    "))
+            print(f"    cited={cited or '(none)'}")
+            history += [{"role": "user", "text": q},
+                        {"role": "assistant", "text": reply}]
+
+
 def looks_like_no_info(reply: str, citations: list) -> bool:
-    return not citations or any(m in reply for m in NO_INFO_MARKERS)
+    r = reply.lower()
+    return not citations or any(m in r for m in NO_INFO_MARKERS)
 
 
 def main() -> None:
     show_full = "--full" in sys.argv
+    if "--followups" in sys.argv:
+        run_followups()
+        return
     if "--all" in sys.argv:
         dataset = QUESTIONS + NO_ANSWER_QUESTIONS
     elif "--negatives" in sys.argv:

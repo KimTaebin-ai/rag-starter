@@ -46,6 +46,11 @@ QUESTIONS = [
     # ── Part 67 — medical standards ──────────────────────────────
     {"q": "Which medical conditions disqualify an applicant for a first-class airman medical certificate?",
      "category": "Part 67 (medical)", "answerable": True, "expect_sources": [P67]},
+    # BasicMed IS in the corpus — Part 68 (§ 68.1/§ 68.3) is bundled inside the
+    # Part 67 PDF, and § 61.113(i) governs the operating limits — so this is a
+    # grounded, answerable question, not a no-info case.
+    {"q": "What are the requirements to fly under BasicMed instead of holding an FAA medical certificate?",
+     "category": "Part 67 (medical)", "answerable": True, "expect_sources": [P67, P61]},
     {"q": "What are the distant and near vision standards for a first-class medical certificate?",
      "category": "Part 67 (medical)", "answerable": True, "expect_sources": [P67]},
     {"q": "What mental-health conditions are disqualifying for an airman medical certificate?",
@@ -122,13 +127,15 @@ QUESTIONS = [
 #   - clearly off-topic (cooking, history, sports, …) — should be gated by
 #     the similarity threshold with no LLM call at all.
 #
+# (BasicMed/Part 68 was previously listed here as "cleanly absent" — it is NOT:
+# § 68.1/§ 68.3 are bundled in the Part 67 PDF, so that question moved to the
+# answerable set above.)
+#
 # Run with: python eval.py --negatives   (or --all to include the set above)
 # ════════════════════════════════════════════════════════════════
 
 NO_ANSWER_QUESTIONS = [
     # Aviation, but in CFR parts NOT in the corpus (verified absent) ──
-    {"q": "What are the requirements to fly under BasicMed instead of holding an FAA medical certificate?",
-     "category": "No-answer (aviation: Part 68)", "answerable": False, "expect_sources": []},
     {"q": "What certification is required to become an air traffic control tower operator?",
      "category": "No-answer (aviation: Part 65)", "answerable": False, "expect_sources": []},
     {"q": "What knowledge and experience are required for an aircraft dispatcher certificate?",
@@ -169,4 +176,35 @@ NO_ANSWER_QUESTIONS = [
      "category": "No-answer (off-topic)", "answerable": False, "expect_sources": []},
     {"q": "Write a short haiku about autumn leaves.",
      "category": "No-answer (off-topic)", "answerable": False, "expect_sources": []},
+]
+
+
+# ════════════════════════════════════════════════════════════════
+# Multi-turn follow-up sequences — check conversation continuity.
+#
+# Each sequence is a list of turns. A later turn deliberately relies on the
+# earlier turn's context (an elliptical "How about ...?" / "그럼 …?"), so a
+# stateless system would mis-answer or ask for clarification. A system that
+# keeps history should resolve the reference and stay on the same topic.
+#
+# Run with: python eval.py --followups
+# ════════════════════════════════════════════════════════════════
+
+FOLLOWUP_SEQUENCES = [
+    # VFR weather minimums, then shift the airspace class only.
+    [
+        "What are the basic VFR weather minimums for Class C airspace?",
+        "How about for Class B?",
+    ],
+    # Private-pilot experience, then narrow to just the night requirement.
+    [
+        "What aeronautical experience is required for a private pilot certificate "
+        "with an airplane single-engine rating?",
+        "그럼 야간 비행 요건만 다시 정리해줘.",
+    ],
+    # First-class medical vision standard, then compare to another class.
+    [
+        "What are the distant vision standards for a first-class medical certificate?",
+        "Are the requirements any different for a third-class medical?",
+    ],
 ]

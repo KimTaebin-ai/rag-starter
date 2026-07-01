@@ -125,11 +125,31 @@ def humanize_source(path: Path) -> str:
     return path.stem
 
 
+def title_for_section(default_title: str, section: str | None) -> str:
+    """Title for a chunk, derived from its § section's Part number when present.
+
+    Some CFR PDFs bundle more than one Part in a single file (e.g. Part 68 /
+    BasicMed sits inside the Part 67 file), so a filename-derived title
+    mislabels the bundled sections. The Part number is the integer before the
+    dot in the section (§ 68.3 → Part 68). Falls back to the file-derived title
+    for chunks with no parsed section.
+    """
+    if section:
+        m = re.search(r"(\d+)\.\d+", section)
+        if m:
+            return f"14 CFR Part {int(m.group(1))}"
+    return default_title
+
+
 # CFR section heading, e.g. "§ 61.109 Aeronautical experience." — a section
-# number followed by a Title-case title and a period. Cross-references like
+# number followed by a Title-case title ending in a period, OR the question-form
+# headings some subparts use, e.g. "§ 61.315 What are the privileges and
+# limitations of a sport pilot certificate?" (Subpart J of Part 61 is written
+# entirely this way — matching only "."-terminated headings silently dropped ~a
+# third of Part 61, including all of sport pilot). Cross-references like
 # "§ 61.107(b)(1)" (paren after the number) or "§ 61.110 of this part"
 # (lowercase after the number) deliberately do NOT match.
-SECTION_RE = re.compile(r"§\s*(\d+\.\d+)\s+([A-Z][^.§\n]{2,80}?)\.")
+SECTION_RE = re.compile(r"§\s*(\d+\.\d+)\s+([A-Z][^.?§\n]{2,120}?)[.?]")
 
 
 def clean_pdf_text(text: str) -> str:
@@ -218,7 +238,7 @@ def build_index() -> list[dict]:
             records.append({
                 "chunk_id": chunk_id,
                 "source": path.name,
-                "title": title,          # Phase 2-3 metadata
+                "title": title_for_section(title, section),  # Phase 2-3 metadata
                 "page": page,            # page number for PDFs, else None
                 "section": section,      # CFR § for PDFs, else None
                 "chunk_index": i,

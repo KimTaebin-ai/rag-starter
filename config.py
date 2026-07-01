@@ -14,6 +14,13 @@ Print the active config at startup with CONFIG.summary().
 import os
 from dataclasses import dataclass, fields
 
+from dotenv import load_dotenv
+
+# Load .env BEFORE the toggles below are read — CONFIG is built at import time,
+# so any module that imports config picks up .env-based overrides regardless of
+# import order.
+load_dotenv()
+
 
 def _flag(name: str, default: bool) -> bool:
     raw = os.getenv(name)
@@ -70,14 +77,44 @@ class Config:
     # ── Phase 3-2 — inject source info into context ──────────────
     enable_source_in_context: bool = _flag("ENABLE_SOURCE_IN_CONTEXT", True)
 
+    # ── Phase 3-4 — cross-reference expansion (follow § refs) ────
+    # FAA rules lean on other sections ("in the areas of operation listed in
+    # § 61.107(b)(1)", "except as provided in § 61.110"). Fetch the referenced
+    # section's chunk so it becomes a real, citable source — the corpus's heavy
+    # cross-referencing means single retrieval often can't complete an answer.
+    # Bounded by max_xref (and no recursion) to keep token cost in check.
+    enable_xref: bool = _flag("ENABLE_XREF", True)
+    max_xref: int = _int("MAX_XREF", 3)
+
+    # ── Phase 3-3 — neighbor chunk expansion (stitch split paragraphs) ─
+    # A long § section is split across several chunks, so a retrieved chunk can
+    # end mid-paragraph ("...3 hours of flight training on the control and
+    # maneuvering of an"). Pull the adjacent chunks of the SAME section in so the
+    # answer isn't truncated at a chunk boundary. radius = chunks on each side.
+    enable_neighbor_expansion: bool = _flag("ENABLE_NEIGHBOR_EXPANSION", True)
+    neighbor_radius: int = _int("NEIGHBOR_RADIUS", 1)
+    # Only expand the top-N most relevant hits — truncation hits the answer
+    # chunk, which reranking floats to the top, so expanding all of top_k just
+    # bloats context. 2 keeps a margin (answer at rank 1 or 2). 0 = expand all.
+    neighbor_expand_top: int = _int("NEIGHBOR_EXPAND_TOP", 2)
+
     # ── Phase 4-1 — re-ranking (fetch many, keep best N) ─────────
     enable_rerank: bool = _flag("ENABLE_RERANK", False)
     rerank_fetch_k: int = _int("RERANK_FETCH_K", 30)        # 1st-pass candidates
     rerank_top_n: int = _int("RERANK_TOP_N", 5)             # kept after rerank
+    # Chars per candidate shown to the reranker. The model only needs enough to
+    # judge relevance — a CFR chunk's section heading + opening fits in ~200, so
+    # 200 cuts the rerank call's input ~60% vs 400 with no ranking change.
+    rerank_passage_chars: int = _int("RERANK_PASSAGE_CHARS", 200)
 
     # ── Phase 4-2 — agentic iterative search (tool loop) ─────────
     enable_agentic_search: bool = _flag("ENABLE_AGENTIC_SEARCH", False)
     max_search_iters: int = _int("MAX_SEARCH_ITERS", 3)     # loop guard
+
+    # ── Multi-turn — conversation history for follow-ups ─────────
+    # Prior turns (text only, no re-sent context) passed to the answer call so
+    # follow-ups like "그럼 야간 요건은?" resolve. Capped to bound token cost.
+    max_history_messages: int = _int("MAX_HISTORY_MESSAGES", 6)
 
     def summary(self) -> str:
         lines = ["Active RAG config:"]
