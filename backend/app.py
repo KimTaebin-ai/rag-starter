@@ -137,7 +137,9 @@ def chat():
         })
 
     t_llm = time.perf_counter()
-    reply, usage = answer(user_message, hits, history)
+    # History was used only to resolve the search query (rewrite_query above);
+    # the answer is grounded in THIS turn's retrieved context alone.
+    reply, usage = answer(user_message, hits)
     llm_ms = _ms(time.perf_counter() - t_llm)
 
     # Renumber [n] markers contiguously ([1][2][4] → [1][2][3]) and keep the
@@ -229,7 +231,8 @@ def chat_stream():
         t_llm = time.perf_counter()
         full_text = ""
         usage = {"input_tokens": 0, "output_tokens": 0}
-        for piece in answer_stream(user_message, hits, history):
+        # History only shaped the search query; answer from this turn's context.
+        for piece in answer_stream(user_message, hits):
             if isinstance(piece, dict):  # terminal {"type": "final", ...}
                 full_text = piece["text"]
                 usage = piece["usage"]

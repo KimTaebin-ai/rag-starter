@@ -103,15 +103,23 @@ class Config:
     # maneuvering of an"). Pull the adjacent chunks of the SAME section in so the
     # answer isn't truncated at a chunk boundary. radius = chunks on each side.
     enable_neighbor_expansion: bool = _flag("ENABLE_NEIGHBOR_EXPANSION", True)
-    neighbor_radius: int = _int("NEIGHBOR_RADIUS", 1)
+    # Default 2: long § sections span 3+ chunks (e.g. § 61.109(a) = 4632→4634),
+    # so radius 1 truncates the paragraph tail ("...maneuvering of an"). 2 reaches
+    # it. This is a production default, not just a .env override — a fresh checkout
+    # must ground/complete answers without depending on a gitignored .env.
+    neighbor_radius: int = _int("NEIGHBOR_RADIUS", 2)
     # Only expand the top-N most relevant hits — truncation hits the answer
     # chunk, which reranking floats to the top, so expanding all of top_k just
     # bloats context. 2 keeps a margin (answer at rank 1 or 2). 0 = expand all.
     neighbor_expand_top: int = _int("NEIGHBOR_EXPAND_TOP", 2)
 
     # ── Phase 4-1 — re-ranking (fetch many, keep best N) ─────────
-    enable_rerank: bool = _flag("ENABLE_RERANK", False)
-    rerank_fetch_k: int = _int("RERANK_FETCH_K", 30)        # 1st-pass candidates
+    # Default ON: many § sections share a generic title ("Aeronautical
+    # experience"), so raw top-k collapses onto one section and mis-ranks the
+    # right chunk → misattributed citations. Rerank over a wider fetch fixes
+    # that. Production default (not just .env) so a fresh checkout cites correctly.
+    enable_rerank: bool = _flag("ENABLE_RERANK", True)
+    rerank_fetch_k: int = _int("RERANK_FETCH_K", 20)        # 1st-pass candidates
     rerank_top_n: int = _int("RERANK_TOP_N", 5)             # kept after rerank
     # Chars per candidate shown to the reranker. The model only needs enough to
     # judge relevance — a CFR chunk's section heading + opening fits in ~200, so
