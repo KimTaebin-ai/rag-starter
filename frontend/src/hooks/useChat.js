@@ -38,8 +38,8 @@ export function useChat() {
         return next;
       });
 
-    // Append the assistant bubble on the first delta so the loading indicator
-    // shows during retrieval, then text starts filling this bubble.
+    // Append the assistant bubble on the first delta/agent step so the loading
+    // indicator shows during retrieval, then text/trace fills this bubble.
     let started = false;
     const ensureBubble = () => {
       if (started) return;
@@ -52,6 +52,18 @@ export function useChat() {
         onDelta: (text) => {
           ensureBubble();
           patchLast((prev) => ({ text: prev.text + text }));
+        },
+        // Agentic loop progress: append each step to a running trace so the UI
+        // can show the search loop live (see AgentTrace).
+        onAgent: (step) => {
+          ensureBubble();
+          patchLast((prev) => ({ agentSteps: [...(prev.agentSteps || []), step] }));
+        },
+        // Text streamed on a turn that then chose to search was preamble, not
+        // the answer — drop it so the real answer streams cleanly.
+        onReset: () => {
+          ensureBubble();
+          patchLast({ text: "" });
         },
         onDone: (data) => {
           ensureBubble();

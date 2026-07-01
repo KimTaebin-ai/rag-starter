@@ -13,7 +13,7 @@ export async function postChat(message, history) {
 // the answer is generated, and onDone(payload) with the final reply + citations
 // /usage/retrieval/timing. Parses the `data: {...}\n\n` event framing by hand
 // (fetch + ReadableStream) so we don't need an EventSource POST shim.
-export async function postChatStream(message, history, { onDelta, onDone }) {
+export async function postChatStream(message, history, { onDelta, onDone, onAgent, onReset }) {
   const res = await fetch("/api/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -30,6 +30,8 @@ export async function postChatStream(message, history, { onDelta, onDone }) {
     if (!line.startsWith("data:")) return;
     const evt = JSON.parse(line.slice(5).trim());
     if (evt.event === "delta") onDelta?.(evt.text);
+    else if (evt.event === "agent") onAgent?.(evt);
+    else if (evt.event === "reset") onReset?.();
     else if (evt.event === "done") onDone?.(evt);
   };
 

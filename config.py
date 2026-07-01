@@ -127,8 +127,14 @@ class Config:
     rerank_passage_chars: int = _int("RERANK_PASSAGE_CHARS", 200)
 
     # ── Phase 4-2 — agentic iterative search (tool loop) ─────────
-    enable_agentic_search: bool = _flag("ENABLE_AGENTIC_SEARCH", False)
+    enable_agentic_search: bool = _flag("ENABLE_AGENTIC_SEARCH", True)
     max_search_iters: int = _int("MAX_SEARCH_ITERS", 3)     # loop guard
+    # Prompt-cache the agentic loop's stable prefix (system + tools + the
+    # conversation so far). The loop re-sends a growing prefix within seconds, so
+    # from turn 2 on it clears the model's 2048-token minimum and later turns
+    # read most of their input from cache (~0.1x) instead of re-billing it. Only
+    # applied on the agentic path — the one-shot answer has no reusable prefix.
+    enable_prompt_cache: bool = _flag("ENABLE_PROMPT_CACHE", True)
 
     # ── Multi-turn — conversation history for follow-ups ─────────
     # Prior turns (text only, no re-sent context) passed to the answer call so

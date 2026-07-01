@@ -291,6 +291,7 @@ body {
 }
 .meta-item { white-space: nowrap; }
 .meta-item.total { color: var(--success); font-weight: 600; }
+.meta-cache { color: var(--accent); font-weight: 600; }
 .meta-sep { color: var(--border-strong); }
 
 /* ── Retrieval monitoring panel ───────────────────────────────── */
@@ -349,6 +350,81 @@ body {
   color: var(--text-faint);
 }
 .rdrop { display: inline-block; margin-left: 0.5rem; font-family: var(--mono); }
+
+/* ── Agent loop trace (agentic search monitor) ────────────────── */
+.agent-trace {
+  margin-top: 0.7rem;
+  margin-bottom: 0.2rem;
+  font-size: 0.8rem;
+  background: var(--accent-weak);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  padding: 0.4rem 0.7rem;
+}
+.agent-trace summary {
+  cursor: pointer;
+  color: var(--accent-strong);
+  font-weight: 600;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.agent-trace summary::-webkit-details-marker { display: none; }
+.at-spark { color: var(--accent); }
+.at-count {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.at-live {
+  margin-left: auto;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+}
+.at-steps {
+  list-style: none;
+  margin: 0.55rem 0 0.1rem;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.at-step {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding-left: 0.15rem;
+  color: var(--text);
+}
+.at-icon {
+  flex: none;
+  width: 1.1rem;
+  text-align: center;
+  color: var(--text-faint);
+}
+.at-body { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.5rem; }
+.at-query {
+  font-family: var(--mono);
+  background: var(--surface);
+  border: 1px solid var(--accent-border);
+  padding: 0.05rem 0.35rem;
+  border-radius: 5px;
+  color: var(--accent-strong);
+}
+.at-found { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.at-total { color: var(--text-faint); }
+.at-answer { color: var(--success); font-weight: 500; }
+.at-forced { color: var(--xref); font-weight: 400; }
+.at-think { color: var(--text-muted); font-style: italic; }
+.at-note { margin-top: 0.4rem; color: var(--xref); }
+.at-pulse { animation: at-pulse 1.1s ease-in-out infinite; }
+@keyframes at-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
 
 /* ── Loading bubble ───────────────────────────────────────────── */
 .loading {

@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 import { linkifyCitations, pdfHref, srcLabel } from "../format";
+import { AgentTrace } from "./AgentTrace";
 import { RetrievalPanel } from "./RetrievalPanel";
 
 // One chat turn: an avatar + the body (assistant Markdown vs. a user bubble),
@@ -56,6 +57,8 @@ export function Message({ m }) {
       <div className="avatar">{isUser ? "You" : "✦"}</div>
 
       <div className="msg-main">
+        {!isUser && <AgentTrace steps={m.agentSteps} streaming={m.streaming} />}
+
         {isUser ? (
           <div className="bubble">{m.text}</div>
         ) : (
@@ -97,6 +100,12 @@ export function Message({ m }) {
             {m.usage && (
               <span className="meta-item">
                 {m.usage.input_tokens} in · {m.usage.output_tokens} out
+                {m.usage.cache_read > 0 && (
+                  <span className="meta-cache" title="Input tokens served from prompt cache (~0.1× cost)">
+                    {" "}
+                    · {m.usage.cache_read.toLocaleString()} cached
+                  </span>
+                )}
               </span>
             )}
             {m.usage && (m.timing?.total_ms != null || m.clientMs != null) && (

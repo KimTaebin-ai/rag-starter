@@ -26,7 +26,8 @@ from flask_cors import CORS
 from config import CONFIG
 from citations import build_citations, build_retrieval, renumber_citations
 from generation import (
-    CLARIFY_PREFIX, NO_INFO_MESSAGE, agentic_chat, answer, answer_stream, rewrite_query,
+    CLARIFY_PREFIX, NO_INFO_MESSAGE, agentic_chat, agentic_chat_events,
+    answer, answer_stream, rewrite_query,
 )
 from retrieval import retrieve
 
@@ -182,12 +183,25 @@ def chat_stream():
     def generate():
         t_start = time.perf_counter()
 
-        # Agentic path can't stream incrementally (it's a tool loop); compute it
-        # fully, then emit the answer as a single delta so the UX is uniform.
+        # Agentic path: stream the search loop as `agent` events (live loop
+        # monitoring) AND the answer token-by-token as `delta` events as the
+        # model composes it inside the tool loop. `answer_reset` clears text the
+        # model streamed on a turn that then decided to search instead.
         if CONFIG.enable_agentic_search:
-            reply, hits, usage = agentic_chat(user_message)
+            reply, hits, usage = "", [], {"input_tokens": 0, "output_tokens": 0}
+            for evt in agentic_chat_events(user_message):
+                t = evt["type"]
+                if t == "final":
+                    reply, hits, usage = evt["reply"], evt["pool"], evt["usage"]
+                elif t == "answer_delta":
+                    yield _sse("delta", text=evt["text"])
+                elif t == "answer_reset":
+                    yield _sse("reset")
+                else:
+                    yield _sse("agent", **evt)
+            # Streamed text carried the pool's raw [n]; the done.reply is the
+            # citation-renumbered text the client swaps in (same as non-agentic).
             reply, cited, uncited = renumber_citations(reply, hits)
-            yield _sse("delta", text=reply)
             yield _sse("done", reply=reply,
                        citations=build_citations(reply, cited), usage=usage,
                        retrieval=build_retrieval(cited + uncited, cited + uncited),
