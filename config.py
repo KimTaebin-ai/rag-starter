@@ -48,12 +48,14 @@ def _str(name: str, default: str) -> str:
 class Config:
     # ── Model ─────────────────────────────────────────────────────
     claude_model: str = _str("CLAUDE_MODEL", "claude-sonnet-4-6")
-    # 4096, not 1024: a full regulatory answer (e.g. § 61.65 instrument rating —
-    # general + 10 knowledge areas + 8 proficiency areas + experience tables)
-    # runs past 1024 AND 2048 output tokens and got cut off mid-list. This is a
-    # CEILING, not a fixed spend — the API bills actual output tokens, so raising
-    # it costs nothing for short answers and only lets genuinely long ones finish.
-    max_tokens: int = _int("MAX_TOKENS", 4096)
+    # 8192, not 4096/1024: a full regulatory answer (e.g. § 61.65 instrument
+    # rating) already ran past 1024/2048 output tokens; a broad "summarize X for
+    # various roles" enumeration (7+ roles with tables + cross-cutting notes)
+    # runs past 4096 too and got cut off mid-citation ("...requalification
+    # training [§"). This is a CEILING, not a fixed spend — the API bills actual
+    # output tokens, so raising it costs nothing for short answers and only lets
+    # the genuinely long enumeration/comparison answers finish.
+    max_tokens: int = _int("MAX_TOKENS", 8192)
 
     # ── Phase 0 — measurement ─────────────────────────────────────
     debug_search: bool = _flag("DEBUG_SEARCH", True)        # 0-2 retrieval debug logs
@@ -131,9 +133,57 @@ class Config:
     # 200 cuts the rerank call's input ~60% vs 400 with no ranking change.
     rerank_passage_chars: int = _int("RERANK_PASSAGE_CHARS", 200)
 
+    # ── Loop retrieval — recall mode (used only inside the agentic loop) ─
+    # The one-shot path is precision-tuned: rerank trims to top-5 and the answer
+    # gate refuses weak questions. That HURTS the loop, where each sub-query is a
+    # facet of a broad/enumeration question ("which rules require X", "summarize Y
+    # for various roles"): rerank (judged against the ORIGINAL question) and the
+    # per-sub-query gate silently drop real facets. In the loop the LLM itself is
+    # the reranker — it reads every passage and filters when it composes the final
+    # answer — so loop retrieval skips rerank + gate and instead keeps the top
+    # recall_k by raw similarity. Neighbor/dedupe/group/xref still run (additive).
+    recall_k: int = _int("RECALL_K", 8)                     # kept per loop search
+    # Token savers for the loop (see A/B/C below). The one-shot path is unaffected.
+    # (C) In recall mode, skip neighbor + cross-reference expansion: each loop
+    # search would otherwise add recall_k PLUS its neighbors and referenced
+    # sections, multiplying the re-sent pool across many searches. The agentic
+    # model can just search again for adjacent/referenced detail, so let it —
+    # one-shot retrieval (recall=False) keeps both expansions for completeness.
+    recall_expand: bool = _flag("RECALL_EXPAND", False)
+    # (B) Hard cap on the accumulated evidence pool. The loop re-sends the whole
+    # pool every turn, so an unbounded pool (a broad question ran to ~88 chunks)
+    # balloons input tokens. Once full, further hits are dropped and the model is
+    # told to answer from what it has. Generous so it never bites normal broad
+    # questions — a safety net against runaway, not a routine limiter.
+    max_pool_chunks: int = _int("MAX_POOL_CHUNKS", 60)
+
+    # ── Keyword (lexical) search tool — recall for enumeration questions ──
+    # Vector similarity misses "which rules require a specific certificate" /
+    # "list the regulations governing oxygen": the answer is scattered across many
+    # sections that share a TERM but not overall meaning, so no single section
+    # scores high. A lexical substring tool gives the model a recall path — one
+    # representative chunk per matching section — to enumerate coverage, then it
+    # can vector-search the promising ones. Additive (a second tool); the existing
+    # vector search_corpus path is unchanged, so focused questions are unaffected.
+    enable_keyword_search: bool = _flag("ENABLE_KEYWORD_SEARCH", True)
+    keyword_search_limit: int = _int("KEYWORD_SEARCH_LIMIT", 15)  # sections/call
+    # (A) keyword_search is a DISCOVERY tool — it shows which sections mention a
+    # term so the model can enumerate coverage, not read full text. Rendering the
+    # full chunk for up to 15 sections is pure waste, so its tool output is
+    # truncated to a snippet (section label + this many chars). The full chunk is
+    # still stored in the pool (so citations + the forced final answer keep full
+    # text); the model search_corpus'es any section it needs in depth.
+    keyword_snippet_chars: int = _int("KEYWORD_SNIPPET_CHARS", 220)
+
     # ── Phase 4-2 — agentic iterative search (tool loop) ─────────
     enable_agentic_search: bool = _flag("ENABLE_AGENTIC_SEARCH", True)
-    max_search_iters: int = _int("MAX_SEARCH_ITERS", 3)     # loop guard
+    # 5, not 3: a broad/multi-part question ("summarize X for various roles",
+    # "compare A vs B") must run one targeted search per role/facet — 3 iters
+    # ran out mid-decomposition and forced a shallow answer off scattered hits.
+    # This is a CEILING: focused questions still answer on iter 1-2 and stop, and
+    # the agentic prefix is prompt-cached, so the extra headroom only costs
+    # tokens on the genuinely broad questions that actually use it.
+    max_search_iters: int = _int("MAX_SEARCH_ITERS", 5)     # loop guard
     # Prompt-cache the agentic loop's stable prefix (system + tools + the
     # conversation so far). The loop re-sends a growing prefix within seconds, so
     # from turn 2 on it clears the model's 2048-token minimum and later turns
