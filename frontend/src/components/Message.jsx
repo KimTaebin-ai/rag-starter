@@ -1,7 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
-import { linkifyCitations, pdfHref } from "../format";
+import { linkifyCitations } from "../format";
 
 // One chat turn: an avatar + the body (assistant Markdown vs. a user bubble).
 // Monitoring detail — sources, tokens/latency, agent trace, and the retrieval
@@ -23,33 +23,24 @@ export function Message({ m, index, active, onSelect, onCite }) {
 
   const citeNs = new Set((m.citations || []).map((c) => c.n));
 
-  // Render [n](#cite-n) markers as inline citation links: they open the cited
-  // source PDF (jumping to the page) and also reveal that source in the
-  // inspector. Leave real links alone.
+  // Render [n](#cite-n) markers as inline citation buttons: clicking one toggles
+  // the inspector for that source (reveal/scroll, or close if already showing
+  // it) — it never opens the PDF. Leave real links alone.
   const markdownComponents = {
     a({ href, children, ...props }) {
       if (href && href.startsWith("#cite-")) {
-        const n = Number(href.slice(6));
-        const cit = (m.citations || []).find((c) => c.n === n);
-        const pdf = cit ? pdfHref(cit) : null;
         return (
-          <a
+          <button
+            type="button"
             className="cite-ref"
-            href={pdf || undefined}
-            target={pdf ? "_blank" : undefined}
-            rel="noreferrer"
-            title={
-              cit
-                ? `Open source PDF${cit.page ? ` (p.${cit.page})` : ""}`
-                : "View source"
-            }
+            title="Toggle source in inspector"
             onClick={(e) => {
               e.stopPropagation();
-              onCite?.(index, n);
+              onCite?.(index, Number(href.slice(6)));
             }}
           >
             [{children}]
-          </a>
+          </button>
         );
       }
       return (

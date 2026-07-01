@@ -84,6 +84,22 @@ body {
   z-index: 1;
 }
 .inspector-head .brand-mark { width: 28px; height: 28px; font-size: 0.9rem; }
+.inspector-head > div { flex: 1; min-width: 0; }
+.inspector-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.inspector-close:hover { background: var(--border); color: var(--text); }
 .inspector-head h2 { margin: 0; font-size: 0.92rem; font-weight: 700; }
 .inspector-sub { margin: 0; font-size: 0.72rem; color: var(--text-muted); }
 .inspector-empty {
@@ -149,6 +165,24 @@ body {
   border-radius: 999px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.inspector-toggle {
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  padding: 0.2rem 0.6rem;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.inspector-toggle:hover { border-color: var(--border-strong); }
+.inspector-toggle.is-on {
+  color: var(--accent-strong);
+  background: var(--accent-weak);
+  border-color: var(--accent-border);
 }
 
 /* ── Message list ─────────────────────────────────────────────── */

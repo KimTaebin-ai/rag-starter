@@ -10,7 +10,7 @@ import { RetrievalPanel } from "./RetrievalPanel";
 // chat keeps the transcript readable while giving retrieval debugging its own
 // dedicated column. `activeN` is set when an inline [n] in the answer is
 // clicked, and reveals/scrolls to the matching source chunk below.
-export function Inspector({ message, activeN }) {
+export function Inspector({ message, activeN, onClose }) {
   // Scroll the cited chunk into view within the panel when [n] is clicked.
   useEffect(() => {
     if (activeN == null || !message) return;
@@ -30,6 +30,14 @@ export function Inspector({ message, activeN }) {
           <h2>Inspector</h2>
           <p className="inspector-sub">Retrieval · sources · usage</p>
         </div>
+        <button
+          type="button"
+          className="inspector-close"
+          title="Hide inspector"
+          onClick={onClose}
+        >
+          ✕
+        </button>
       </div>
 
       {!message ? (

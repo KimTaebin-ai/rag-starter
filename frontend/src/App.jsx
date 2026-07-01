@@ -10,9 +10,10 @@ export default function App() {
   const { messages, loading, totals, send } = useChat();
 
   // Which answer the inspector reflects, and (optionally) the source chunk an
-  // inline [n] click asked it to reveal.
+  // inline [n] click asked it to reveal. `inspectorOpen` toggles the sidebar.
   const [activeIndex, setActiveIndex] = useState(null);
   const [activeN, setActiveN] = useState(null);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
 
   // Show the loading indicator only while waiting (retrieval); once the answer
   // starts streaming into its own bubble, that bubble is the progress signal.
@@ -40,9 +41,16 @@ export default function App() {
     setActiveIndex(i);
     setActiveN(null);
   };
+  // Clicking an inline [n] toggles the inspector: open it on that source, or
+  // close it if it's already open on that same citation.
   const goToCitation = (i, n) => {
+    if (inspectorOpen && activeIndex === i && activeN === n) {
+      setInspectorOpen(false);
+      return;
+    }
     setActiveIndex(i);
     setActiveN(n);
+    setInspectorOpen(true);
   };
 
   const activeMsg = activeIndex != null ? messages[activeIndex] : null;
@@ -62,6 +70,15 @@ export default function App() {
             <span className="stat">↑ {totals.totalIn.toLocaleString()} in</span>
             <span className="stat">↓ {totals.totalOut.toLocaleString()} out</span>
             {totals.avgMs != null && <span className="stat">~{totals.avgMs} ms avg</span>}
+            <button
+              type="button"
+              className={`inspector-toggle${inspectorOpen ? " is-on" : ""}`}
+              aria-pressed={inspectorOpen}
+              title={inspectorOpen ? "Hide inspector" : "Show inspector"}
+              onClick={() => setInspectorOpen((o) => !o)}
+            >
+              ⧉ Inspector
+            </button>
           </div>
         </header>
 
@@ -94,7 +111,13 @@ export default function App() {
         </footer>
       </div>
 
-      <Inspector message={activeMsg} activeN={activeN} />
+      {inspectorOpen && (
+        <Inspector
+          message={activeMsg}
+          activeN={activeN}
+          onClose={() => setInspectorOpen(false)}
+        />
+      )}
     </div>
   );
 }
