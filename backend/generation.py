@@ -19,6 +19,12 @@ from tokens import TOKENS, client
 
 NO_INFO_MESSAGE = "관련 정보를 찾지 못했습니다."
 
+# rewrite_query returns "CLARIFY: <되물음>" when the question (after resolving the
+# prior turns) is too broad/underspecified to search meaningfully — e.g. a bare
+# follow-up like "그럼 비행기는?" whose only content is a huge topic word. The
+# caller then asks the user to narrow down instead of dumping a generic answer.
+CLARIFY_PREFIX = "CLARIFY:"
+
 SYSTEM_PROMPT = """Answer the question using ONLY the numbered CONTEXT sources.
 
 - Synthesize a direct answer to the question; integrate facts across the sources \
@@ -67,7 +73,33 @@ def rewrite_query(question: str, history: list[dict] | None = None) -> str:
                 "operating rules). Resolve vague pronouns and implicit context "
                 "(including the prior conversation turns) into explicit "
                 "regulatory terms (e.g. part/section names, airspace classes). "
-                "Output ONLY the rewritten query, no quotes, no explanation."
+                "Output ONLY the rewritten query, no quotes, no explanation.\n"
+                "EXCEPTION — clarification: output "
+                f"'{CLARIFY_PREFIX} <one short question, in the user's language, "
+                "asking them to narrow it down, with 2-4 concrete example "
+                "aspects>' ONLY when BOTH hold: (a) the question (after using the "
+                "prior turns) is squarely WITHIN this aviation / 14 CFR domain, "
+                "AND (b) it is nothing but a bare topic with NO specific aspect — "
+                "e.g. just '비행기?', 'aircraft?', '항공 규정 알려줘', 'tell me about "
+                "aviation rules'.\n"
+                "Do NOT clarify — instead output a plain search query (or the "
+                "question as-is) and let retrieval + the answer step report "
+                "'not in the sources' — in EITHER of these cases:\n"
+                "1. The question is OUTSIDE the aviation / 14 CFR domain (cooking, "
+                "personal questions, general chit-chat, etc. — e.g. "
+                "'사과파이 만드는 법', 'what is my name?', 'tell me a joke'). In this "
+                "case output the user's question VERBATIM, exactly as written — do "
+                "NOT translate it, add any aviation/regulatory terms, answer it, or "
+                "remark that it is out of scope. A faithful off-domain query "
+                "retrieves nothing and the system then reports no information. "
+                "Never ask them to narrow an off-domain question down to an "
+                "aviation topic.\n"
+                "2. The question names ANY specific aspect — a requirement, "
+                "section, number, name, person, event, date, comparison, or action "
+                "(e.g. 'the name of the last selected pilot', 'night flight hours', "
+                "'Class B rules') — even if the corpus likely can't answer it.\n"
+                "Clarify is ONLY for a bare, in-domain aviation topic; never for an "
+                "off-domain question and never for a specific but possibly-unanswerable one."
             ),
             messages=(history or []) + [{"role": "user", "content": question}],
         )
@@ -95,6 +127,30 @@ def answer(question: str, hits: list[dict], history: list[dict]) -> tuple[str, d
     )
     usage = TOKENS.record(resp.usage, "answer")
     return resp.content[0].text, usage
+
+
+def answer_stream(question: str, hits: list[dict], history: list[dict]):
+    """Streaming variant of `answer` for a typewriter UX.
+
+    Yields the answer's text incrementally as Claude produces it, then a final
+    {"type": "final", "text": <full answer>, "usage": <usage>} dict once the
+    stream closes (so the caller can renumber citations and record tokens on the
+    complete text). Same prompt/inputs as `answer` — only the transport differs.
+    """
+    context = build_context(hits)
+    user_content = f"CONTEXT:\n{context}\n\nQUESTION:\n{question}"
+    with client.messages.stream(
+        model=CONFIG.claude_model,
+        max_tokens=CONFIG.max_tokens,
+        system=SYSTEM_PROMPT,
+        messages=history + [{"role": "user", "content": user_content}],
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+        final = stream.get_final_message()
+    usage = TOKENS.record(final.usage, "answer")
+    full_text = "".join(b.text for b in final.content if getattr(b, "type", None) == "text")
+    yield {"type": "final", "text": full_text, "usage": usage}
 
 
 # ════════════════════════════════════════════════════════════════

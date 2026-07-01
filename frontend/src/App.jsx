@@ -6,6 +6,11 @@ import { useChat } from "./hooks/useChat";
 export default function App() {
   const { messages, loading, totals, send } = useChat();
 
+  // Show the loading indicator only while waiting (retrieval); once the answer
+  // starts streaming into its own bubble, that bubble is the progress signal.
+  const last = messages[messages.length - 1];
+  const streaming = last?.role === "assistant" && last.streaming;
+
   return (
     <div className="app">
       <header className="topbar">
@@ -37,7 +42,7 @@ export default function App() {
         {messages.map((m, i) => (
           <Message key={i} m={m} />
         ))}
-        {loading && <LoadingBubble />}
+        {loading && !streaming && <LoadingBubble />}
       </main>
 
       <footer className="composer-bar">

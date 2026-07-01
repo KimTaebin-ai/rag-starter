@@ -373,6 +373,21 @@ body {
   0%, 80%, 100% { opacity: 0.25; }
   40% { opacity: 1; }
 }
+
+/* Blinking caret trailing the answer while it streams in (typewriter effect). */
+.stream-caret {
+  display: inline-block;
+  width: 0.5em;
+  height: 1em;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: var(--text-faint);
+  animation: caret-blink 1s step-end infinite;
+}
+@keyframes caret-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
 .loading-elapsed {
   margin-left: auto;
   color: var(--text-faint);

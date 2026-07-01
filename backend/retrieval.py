@@ -231,6 +231,18 @@ def retrieve(question: str, search_query: str) -> tuple[list[dict], list[dict]]:
     log_search("raw", search_query, raw_hits)
     hits = raw_hits
 
+    # Answer gate: if even the best hit is weak, the corpus doesn't cover this
+    # question. Return no hits NOW — before rerank/expansion/answer — so the
+    # caller skips every LLM call and the request costs zero tokens.
+    if CONFIG.enable_answer_gate:
+        top_sim = raw_hits[0]["similarity"] if raw_hits else 0.0
+        if top_sim < CONFIG.min_answer_similarity:
+            log_search(
+                f"answer gate: top sim {top_sim:.3f} < {CONFIG.min_answer_similarity} → no-info",
+                search_query, [],
+            )
+            return [], raw_hits
+
     if CONFIG.enable_threshold:
         hits = [h for h in hits if h["similarity"] >= CONFIG.similarity_threshold]
         log_search(f"after threshold>={CONFIG.similarity_threshold}", search_query, hits)

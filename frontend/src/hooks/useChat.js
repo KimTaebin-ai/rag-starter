@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { postChat } from "../api";
+import { postChatStream } from "../api";
 
 // Owns the conversation: message list, send flow, and the running session
 // totals shown in the header.
@@ -27,28 +27,52 @@ export function useChat() {
     setLoading(true);
 
     const t0 = performance.now();
+
+    // Patch the LAST message in place — used to stream text into the assistant
+    // turn and to swap in the final metadata once the stream closes.
+    const patchLast = (patch) =>
+      setMessages((m) => {
+        const next = m.slice();
+        const i = next.length - 1;
+        next[i] = { ...next[i], ...(typeof patch === "function" ? patch(next[i]) : patch) };
+        return next;
+      });
+
+    // Append the assistant bubble on the first delta so the loading indicator
+    // shows during retrieval, then text starts filling this bubble.
+    let started = false;
+    const ensureBubble = () => {
+      if (started) return;
+      started = true;
+      setMessages((m) => [...m, { role: "assistant", text: "", citations: [], streaming: true }]);
+    };
+
     try {
-      const data = await postChat(question, history);
-      const clientMs = Math.round(performance.now() - t0); // round-trip incl. network
-      setMessages((m) => [...m, {
-        role: "assistant",
-        text: data.reply,
-        citations: data.citations || [],
-        usage: data.usage || null,
-        retrieval: data.retrieval || null,
-        timing: data.timing || null,
-        clientMs,
-      }]);
+      await postChatStream(question, history, {
+        onDelta: (text) => {
+          ensureBubble();
+          patchLast((prev) => ({ text: prev.text + text }));
+        },
+        onDone: (data) => {
+          ensureBubble();
+          patchLast({
+            text: data.reply,
+            citations: data.citations || [],
+            usage: data.usage || null,
+            retrieval: data.retrieval || null,
+            timing: data.timing || null,
+            clientMs: Math.round(performance.now() - t0), // round-trip incl. network
+            streaming: false,
+          });
+        },
+      });
     } catch (err) {
-      setMessages((m) => [...m, {
-        role: "assistant",
+      ensureBubble();
+      patchLast({
         text: `_Request failed: ${err.message}_`,
-        citations: [],
-        usage: null,
-        retrieval: null,
-        timing: null,
+        streaming: false,
         clientMs: Math.round(performance.now() - t0),
-      }]);
+      });
     } finally {
       setLoading(false);
     }

@@ -63,6 +63,7 @@ export function Message({ m }) {
             <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
               {linkifyCitations(m.text, citeNs)}
             </ReactMarkdown>
+            {m.streaming && <span className="stream-caret" aria-hidden="true" />}
           </div>
         )}
 

@@ -65,6 +65,17 @@ class Config:
     # default — raise it cautiously while watching the [search] score logs.
     similarity_threshold: float = _float("SIMILARITY_THRESHOLD", 0.35)
 
+    # ── Answer gate — refuse to answer (0 LLM tokens) off-topic questions ─
+    # similarity_threshold (above) decides which chunks to INCLUDE; this decides
+    # whether to ANSWER AT ALL. In-corpus questions score ~0.65–0.78 on their top
+    # hit; clearly off-topic ones ("what is my name?", "내 이름이 뭐야") top out at
+    # ~0.27–0.36 and can squeak a single weak chunk past 0.35 — enough to fire an
+    # answer call. Requiring the BEST hit to clear this higher bar short-circuits
+    # such questions to the no-info reply BEFORE any LLM call. Sits in the wide
+    # 0.36–0.65 gap, so it drops off-topic questions without touching real hits.
+    enable_answer_gate: bool = _flag("ENABLE_ANSWER_GATE", True)
+    min_answer_similarity: float = _float("MIN_ANSWER_SIMILARITY", 0.45)
+
     # ── Phase 2-2 — query rewrite (extra LLM call) ────────────────
     enable_query_rewrite: bool = _flag("ENABLE_QUERY_REWRITE", False)
 
