@@ -1,35 +1,34 @@
-import { srcLabel } from "../format";
+import { pdfHref, srcLabel } from "../format";
 
-// Retrieval monitoring panel: shows what the vector search returned, the
-// similarity scores, which chunks the LLM actually used (incl. cross-references),
-// and which the threshold dropped — so you can judge retrieval accuracy at a glance.
-//
-// Controlled open state + `activeN`/`idPrefix` let an inline [n] citation open
-// this panel and scroll/highlight the exact source chunk it points to.
-export function RetrievalPanel({ retrieval, open, onToggle, activeN, idPrefix }) {
+// Retrieval monitoring section (rendered inside the Inspector): shows what the
+// vector search returned, the similarity scores, which chunks the LLM actually
+// used (incl. cross-references), and which the threshold dropped — so you can
+// judge retrieval accuracy at a glance. `activeN`/`idPrefix` let an inline [n]
+// citation scroll/highlight the exact source chunk it points to.
+export function RetrievalPanel({ retrieval, activeN, idPrefix }) {
   if (!retrieval) return null;
   const { chunks = [], dropped = [], threshold, search_query } = retrieval;
   return (
-    <details
-      className="retrieval"
-      open={open}
-      onToggle={(e) => onToggle?.(e.currentTarget.open)}
-    >
-      <summary>
+    <section className="retrieval">
+      <h3 className="insp-title">
         Retrieval — {chunks.length} used
         {dropped.length ? `, ${dropped.length} dropped` : ""}
         {threshold != null ? ` (threshold ${threshold})` : ""}
-      </summary>
+      </h3>
       {search_query && (
         <div className="rq">
           Search query: <code>{search_query}</code>
         </div>
       )}
       {chunks.map((h) => (
-        <div
+        <a
           key={`u${h.n}`}
           id={idPrefix ? `${idPrefix}-src-${h.n}` : undefined}
           className={`rhit${activeN === h.n ? " rhit-active" : ""}`}
+          href={pdfHref(h) || undefined}
+          target="_blank"
+          rel="noreferrer"
+          title={`Open PDF${h.page ? ` (p.${h.page})` : ""}`}
         >
           <div className="rhit-head">
             <span className="rn">[{h.n}]</span>
@@ -41,7 +40,7 @@ export function RetrievalPanel({ retrieval, open, onToggle, activeN, idPrefix })
             )}
           </div>
           {h.preview && <div className="rprev">{h.preview}…</div>}
-        </div>
+        </a>
       ))}
       {dropped.length > 0 && (
         <div className="rdropped">
@@ -53,6 +52,6 @@ export function RetrievalPanel({ retrieval, open, onToggle, activeN, idPrefix })
           ))}
         </div>
       )}
-    </details>
+    </section>
   );
 }

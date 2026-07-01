@@ -48,7 +48,12 @@ def _str(name: str, default: str) -> str:
 class Config:
     # ── Model ─────────────────────────────────────────────────────
     claude_model: str = _str("CLAUDE_MODEL", "claude-sonnet-4-6")
-    max_tokens: int = _int("MAX_TOKENS", 1024)
+    # 4096, not 1024: a full regulatory answer (e.g. § 61.65 instrument rating —
+    # general + 10 knowledge areas + 8 proficiency areas + experience tables)
+    # runs past 1024 AND 2048 output tokens and got cut off mid-list. This is a
+    # CEILING, not a fixed spend — the API bills actual output tokens, so raising
+    # it costs nothing for short answers and only lets genuinely long ones finish.
+    max_tokens: int = _int("MAX_TOKENS", 4096)
 
     # ── Phase 0 — measurement ─────────────────────────────────────
     debug_search: bool = _flag("DEBUG_SEARCH", True)        # 0-2 retrieval debug logs

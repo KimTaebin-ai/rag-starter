@@ -30,6 +30,7 @@ from generation import (
     answer, answer_stream, rewrite_query,
 )
 from retrieval import retrieve
+from tokens import TOKENS
 
 # Corpus PDFs, served read-only so citations can deep-link to a page.
 DOCS_DIR = Path(__file__).resolve().parent.parent / "documents"
@@ -80,24 +81,17 @@ def chat():
     user_message = request.json["message"]
     history = _history_messages(request.json.get("history"))
     t_start = time.perf_counter()
+    # Accumulate EVERY LLM call this request makes (rewrite + rerank + answer, or
+    # every agentic turn) so the reported usage is the question's true token cost,
+    # not just the final answer call's.
+    TOKENS.start_request()
 
-    # Agentic path: Claude drives search as a tool loop (Phase 4-2).
-    if CONFIG.enable_agentic_search:
-        reply, hits, usage = agentic_chat(user_message)
-        reply, cited, uncited = renumber_citations(reply, hits)
-        timing = {"total_ms": _ms(time.perf_counter() - t_start)}
-        print(f"[timing] agentic total={timing['total_ms']}ms")
-        return jsonify({
-            "reply": reply,
-            "citations": build_citations(reply, cited),
-            "usage": usage,
-            "retrieval": build_retrieval(cited + uncited, cited + uncited),
-            "timing": timing,
-        })
-
-    # Rewrite the question into a better search query when explicitly enabled,
-    # OR whenever there's history: a follow-up like "How about for Class B?" is
-    # meaningless to vector search until it's resolved against the prior turns.
+    # Resolve a follow-up into a standalone query BEFORE dispatching, so BOTH the
+    # agentic loop and one-shot retrieval get a self-contained question. A bare
+    # follow-up like "그럼 야간 비행은?" is meaningless on its own — without this the
+    # agentic path (which takes only the message) searched the fragment verbatim
+    # and returned an empty answer. Runs only when there's history to resolve (or
+    # rewrite is explicitly on); a first-turn question passes through unchanged.
     if CONFIG.enable_query_rewrite or history:
         search_query = rewrite_query(user_message, history)
         print(f"[query_rewrite] {user_message!r} → {search_query!r}")
@@ -111,9 +105,25 @@ def chat():
         return jsonify({
             "reply": clarification,
             "citations": [],
-            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "usage": TOKENS.end_request(),  # the rewrite call still cost tokens
             "retrieval": None,
             "timing": {"total_ms": _ms(time.perf_counter() - t_start)},
+        })
+
+    # Agentic path: Claude drives search as a tool loop (Phase 4-2). Seeded with
+    # the resolved standalone query so follow-ups keep their context.
+    if CONFIG.enable_agentic_search:
+        reply, hits, _ = agentic_chat(search_query)
+        reply = reply.strip() or NO_INFO_MESSAGE  # never return a blank bubble
+        reply, cited, uncited = renumber_citations(reply, hits)
+        timing = {"total_ms": _ms(time.perf_counter() - t_start)}
+        print(f"[timing] agentic total={timing['total_ms']}ms")
+        return jsonify({
+            "reply": reply,
+            "citations": build_citations(reply, cited),
+            "usage": TOKENS.end_request(),
+            "retrieval": build_retrieval(cited + uncited, cited + uncited),
+            "timing": timing,
         })
 
     t_retrieval = time.perf_counter()
@@ -132,7 +142,7 @@ def chat():
         return jsonify({
             "reply": NO_INFO_MESSAGE,
             "citations": [],
-            "usage": {"input_tokens": 0, "output_tokens": 0},
+            "usage": TOKENS.end_request(),  # rewrite (if any) still cost tokens
             "retrieval": retrieval,
             "timing": timing,
         })
@@ -140,7 +150,7 @@ def chat():
     t_llm = time.perf_counter()
     # History was used only to resolve the search query (rewrite_query above);
     # the answer is grounded in THIS turn's retrieved context alone.
-    reply, usage = answer(user_message, hits)
+    reply, _ = answer(user_message, hits)
     llm_ms = _ms(time.perf_counter() - t_llm)
 
     # Renumber [n] markers contiguously ([1][2][4] → [1][2][3]) and keep the
@@ -156,7 +166,7 @@ def chat():
     return jsonify({
         "reply": reply,
         "citations": build_citations(reply, cited),
-        "usage": usage,
+        "usage": TOKENS.end_request(),
         "retrieval": retrieval,
         "timing": timing,
     })
@@ -182,32 +192,11 @@ def chat_stream():
 
     def generate():
         t_start = time.perf_counter()
+        TOKENS.start_request()  # accumulate every LLM call this request makes
 
-        # Agentic path: stream the search loop as `agent` events (live loop
-        # monitoring) AND the answer token-by-token as `delta` events as the
-        # model composes it inside the tool loop. `answer_reset` clears text the
-        # model streamed on a turn that then decided to search instead.
-        if CONFIG.enable_agentic_search:
-            reply, hits, usage = "", [], {"input_tokens": 0, "output_tokens": 0}
-            for evt in agentic_chat_events(user_message):
-                t = evt["type"]
-                if t == "final":
-                    reply, hits, usage = evt["reply"], evt["pool"], evt["usage"]
-                elif t == "answer_delta":
-                    yield _sse("delta", text=evt["text"])
-                elif t == "answer_reset":
-                    yield _sse("reset")
-                else:
-                    yield _sse("agent", **evt)
-            # Streamed text carried the pool's raw [n]; the done.reply is the
-            # citation-renumbered text the client swaps in (same as non-agentic).
-            reply, cited, uncited = renumber_citations(reply, hits)
-            yield _sse("done", reply=reply,
-                       citations=build_citations(reply, cited), usage=usage,
-                       retrieval=build_retrieval(cited + uncited, cited + uncited),
-                       timing={"total_ms": _ms(time.perf_counter() - t_start)})
-            return
-
+        # Resolve a follow-up into a standalone query BEFORE dispatching, so the
+        # agentic loop and one-shot retrieval alike keep the follow-up's context
+        # (a bare "그럼 야간 비행은?" is unanswerable on its own).
         if CONFIG.enable_query_rewrite or history:
             search_query = rewrite_query(user_message, history)
             print(f"[query_rewrite] {user_message!r} → {search_query!r}")
@@ -220,8 +209,35 @@ def chat_stream():
             print("[clarify] question too vague → asking to narrow down")
             yield _sse("delta", text=clarification)
             yield _sse("done", reply=clarification, citations=[],
-                       usage={"input_tokens": 0, "output_tokens": 0},
+                       usage=TOKENS.end_request(),  # the rewrite call still cost tokens
                        retrieval=None,
+                       timing={"total_ms": _ms(time.perf_counter() - t_start)})
+            return
+
+        # Agentic path: stream the search loop as `agent` events (live loop
+        # monitoring) AND the answer token-by-token as `delta` events as the
+        # model composes it inside the tool loop. `answer_reset` clears text the
+        # model streamed on a turn that then decided to search instead. Seeded
+        # with the resolved query so follow-ups keep their context.
+        if CONFIG.enable_agentic_search:
+            reply, hits = "", []
+            for evt in agentic_chat_events(search_query):
+                t = evt["type"]
+                if t == "final":
+                    reply, hits = evt["reply"], evt["pool"]
+                elif t == "answer_delta":
+                    yield _sse("delta", text=evt["text"])
+                elif t == "answer_reset":
+                    yield _sse("reset")
+                else:
+                    yield _sse("agent", **evt)
+            # Streamed text carried the pool's raw [n]; the done.reply is the
+            # citation-renumbered text the client swaps in (same as non-agentic).
+            reply = reply.strip() or NO_INFO_MESSAGE  # never return a blank bubble
+            reply, cited, uncited = renumber_citations(reply, hits)
+            yield _sse("done", reply=reply,
+                       citations=build_citations(reply, cited), usage=TOKENS.end_request(),
+                       retrieval=build_retrieval(cited + uncited, cited + uncited),
                        timing={"total_ms": _ms(time.perf_counter() - t_start)})
             return
 
@@ -238,18 +254,16 @@ def chat_stream():
                       "total_ms": _ms(time.perf_counter() - t_start)}
             yield _sse("delta", text=NO_INFO_MESSAGE)
             yield _sse("done", reply=NO_INFO_MESSAGE, citations=[],
-                       usage={"input_tokens": 0, "output_tokens": 0},
+                       usage=TOKENS.end_request(),  # rewrite (if any) still cost tokens
                        retrieval=retrieval, timing=timing)
             return
 
         t_llm = time.perf_counter()
         full_text = ""
-        usage = {"input_tokens": 0, "output_tokens": 0}
         # History only shaped the search query; answer from this turn's context.
         for piece in answer_stream(user_message, hits):
             if isinstance(piece, dict):  # terminal {"type": "final", ...}
                 full_text = piece["text"]
-                usage = piece["usage"]
             else:
                 yield _sse("delta", text=piece)
         llm_ms = _ms(time.perf_counter() - t_llm)
@@ -261,7 +275,7 @@ def chat_stream():
                   "total_ms": _ms(time.perf_counter() - t_start)}
         print(f"[timing] retrieval={retrieval_ms}ms llm={llm_ms}ms total={timing['total_ms']}ms (stream)")
         yield _sse("done", reply=reply, citations=build_citations(reply, cited),
-                   usage=usage, retrieval=retrieval, timing=timing)
+                   usage=TOKENS.end_request(), retrieval=retrieval, timing=timing)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
