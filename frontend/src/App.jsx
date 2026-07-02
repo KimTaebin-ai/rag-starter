@@ -68,8 +68,12 @@ export default function App() {
           </div>
           <div className="stats">
             <span className="stat">↑ {totals.totalIn.toLocaleString()} in</span>
-            <span className="stat">↓ {totals.totalOut.toLocaleString()} out</span>
-            {totals.avgMs != null && <span className="stat">~{totals.avgMs} ms avg</span>}
+            <span className="stat">
+              ↓ {totals.totalOut.toLocaleString()} out
+            </span>
+            {totals.avgMs != null && (
+              <span className="stat">~{totals.avgMs} ms avg</span>
+            )}
             <button
               type="button"
               className={`inspector-toggle${inspectorOpen ? " is-on" : ""}`}
